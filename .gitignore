@@ -1,0 +1,4 @@
+# exclude downloaded files
+google-cloud-*
+
+.vscode
