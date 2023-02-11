@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+# Usage:
+#
+#   ./gcloud-versions init
+#
+#   ./gcloud-versions capture --start 275
+#   ./gcloud-versions capture --start 275 --end 417 --increment 5
+#   ./gcloud-versions capture --next
+#
+#   ./gcloud-versions dl --all
+#   ./gcloud-versions dl 417
+#   ./gcloud-versions dl 417.1
+
+git_submodule_dir="./versions"
+
+platform="darwin-x86_64"
+
+min_version=275
+max_version=999
+
+# if submodule dir exists
+#  - show output latest version
+#  - attempt to download new version
+
+# if missing submodule dir
+#  - create
+#  - submodule init
+
+for ((i = min_version; i <= max_version; i++)); do
+    # dl sdk
+    uri="gs://cloud-sdk-release/google-cloud-sdk-${i}.0.0-${platform}.tar.gz"
+    cmd="gsutil cp $uri"
+    echo $cmd
+    $cmd
+
+    # rm all files in git submodule dir
+    # unarchive sdk to git submodule dir
+    # git add
+    # git commit -m "123.0"
+    # rm sdk
+done
