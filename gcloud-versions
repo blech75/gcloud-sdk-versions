@@ -6,37 +6,291 @@
 #
 #   ./gcloud-versions capture --start 275
 #   ./gcloud-versions capture --start 275 --end 417 --increment 5
+#   ./gcloud-versions capture VERSION
 #   ./gcloud-versions capture --next
 #
 #   ./gcloud-versions dl --all
 #   ./gcloud-versions dl 417
 #   ./gcloud-versions dl 417.1
 
-git_submodule_dir="./versions"
+# ----
+# boilerplate
 
+set -o errexit
+
+# include our scripts boilerplate and common functionality
+# shellcheck source=common
+source ./common
+
+# ----
+# help
+
+function docs() {
+  echo "Handles downloading google cloud sdk"
+  echo
+  usage
+}
+
+function usage() {
+  case "$1" in
+  "dl")
+    echo "Usage: $(basename "$0") dl VERSION"
+    echo
+    echo "    VERSION    gcloud SDK version to download"
+    echo
+    ;;
+
+  "capture")
+    echo "Usage: $(basename "$0") capture "
+    echo
+    echo "    -s         Start version (defaults to 275)"
+    echo "    -e         End version (defaults to 999)"
+    echo "    -i         Version increment step (defaults to 1)"
+    echo
+    ;;
+
+  *)
+    echo "Usage: $(basename "$0") [-h] (dl|capture|reset)"
+    echo
+    echo "    -h         Display documentation."
+    echo
+    echo "    dl         Download SDK only"
+    echo "    capture    Download SDK, install python libs, and create git commits"
+    echo "    reset      Remove submodule repo and start over"
+    echo
+    ;;
+  esac
+}
+
+# ----
+# funcs
+
+# overrides samne func in common
+function dieWithUsage() {
+  topic=$1
+  shift
+  for msg in "$@"; do
+    echo "$msg" >&2
+  done
+  echo >&2
+  usage "$topic" >&2 && exit 1
+}
+
+function sdkFilename() {
+  local version="$1"
+
+  echo "google-cloud-sdk-${version}.0.0-${platform}.tar.gz"
+}
+
+function download() {
+  if [ -z "${1}" ]; then
+    return 1
+  fi
+
+  local filename
+  filename=$(sdkFilename "${1}")
+
+  # uri="gs://cloud-sdk-release/${filename}"
+  # cmd="gsutil cp $uri ."
+
+  uri="https://storage.googleapis.com/cloud-sdk-release/${filename}"
+  cmd="curl --fail -sO $uri"
+
+  echo "${c_gry}\$ ${cmd}${c_off}"
+  set +o errexit
+  $cmd
+  status=$?
+  set -o errexit
+
+  if [[ $status -gt 0 ]]; then
+    die "${error}: Failed downloading version ${v}" "(${uri})"
+  fi
+}
+
+function setupSubmodule() {
+  local dir="${1}"
+
+  echo "Creating git submodule in ./${dir} ..."
+  mkdir -p "${dir}"
+
+  pushd "${dir}" >/dev/null 2>&1
+
+  init_cmd="git init --quiet ."
+  echo "${c_gry}\$ ${init_cmd}${c_off}"
+  $init_cmd 2>/dev/null
+
+  ignore_cmd="git ignore --local *.pyc .backup"
+  echo "${c_gry}\$ ${ignore_cmd}${c_off}"
+  $ignore_cmd 2>/dev/null
+
+  git_add_cmd="git add .gitignore"
+  echo "${c_gry}\$ ${git_add_cmd}${c_off}"
+  $git_add_cmd 2>/dev/null
+
+  commit_cmd=(git commit --quiet -m 'initial (empty) commit')
+  echo "${c_gry}\$ ${commit_cmd[*]}${c_off}"
+  "${commit_cmd[@]}" 2>/dev/null
+
+  popd >/dev/null 2>&1
+
+  add_cmd="git submodule add --quiet ./${dir}"
+  echo "${c_gry}\$ ${add_cmd}${c_off}"
+  $add_cmd 2>/dev/null
+
+  echo "Done!"
+}
+
+# ----
+# constants
+
+submodule_dir="versions"
 platform="darwin-x86_64"
+sdk_dir="google-cloud-sdk"
 
-min_version=275
-max_version=999
+# ----
+# defaults
 
-# if submodule dir exists
-#  - show output latest version
-#  - attempt to download new version
+v_start="275"
+v_end="999"
+v_incr="1"
+next="false"
 
-# if missing submodule dir
-#  - create
-#  - submodule init
+# ----
+# main
 
-for ((i = min_version; i <= max_version; i++)); do
-    # dl sdk
-    uri="gs://cloud-sdk-release/google-cloud-sdk-${i}.0.0-${platform}.tar.gz"
-    cmd="gsutil cp $uri"
-    echo $cmd
-    $cmd
+while getopts ":h" opt; do
+  case ${opt} in
+  h)
+    showHelp
+    ;;
+
+  \?)
+    dieWithUsage main "${error} Invalid option: -$OPTARG"
+    ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+subcommand="$1"
+
+if [ -z "${subcommand}" ]; then
+  dieWithUsage main "${error} Please provide a command (e.g. 'dl', 'capture', 'reset')."
+fi
+shift
+
+case "$subcommand" in
+"dl")
+  v="$1"
+  if [ -z "${v}" ]; then
+    dieWithUsage dl "${error} Missing version."
+  fi
+  shift
+
+  download "${v}"
+
+  exit 0
+  ;;
+
+"capture")
+  while getopts "s:e:i:n" opt; do
+    case "${opt}" in
+    s)
+      v_start="${OPTARG}"
+      ;;
+    e)
+      v_end="${OPTARG}"
+      ;;
+    i)
+      v_incr="${OPTARG}"
+      ;;
+    n)
+      next="true"
+      ;;
+    \?)
+      dieWithUsage capture "${error} Invalid option: -$OPTARG"
+      ;;
+    :)
+      dieWithUsage capture "${error} Option -$OPTARG requires an argument."
+      ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  submodules="$(git submodule)"
+  if [[ -z "${submodules}" ]]; then
+    setupSubmodule $submodule_dir
+    echo
+  fi
+
+  # if submodule dir exists
+  #  - show output latest version
+  #  - attempt to download new version
+
+  incr_msg="all versions"
+  if [[ "${v_incr}" != "1" ]]; then
+    incr_msg="every ${v_incr} version"
+  fi
+  v_end_msg=$v_end
+  if [[ "${v_end}" == "999" ]]; then
+    v_end_msg="(latest)"
+  fi
+
+  echo "Downloading ${incr_msg}, from ${v_start} to ${v_end_msg}..."
+  echo
+
+  for ((v = v_start; v <= v_end; v += v_incr)); do
+    echo ">> ${c_bgrn}Version ${v}${c_off} <<"
+    download "${v}"
+    sdk_filename=$(sdkFilename "${v}")
+
+    pushd_cmd="pushd ${submodule_dir}"
+    echo "${c_gry}\$ ${pushd_cmd}${c_off}"
+    $pushd_cmd >/dev/null 2>&1
 
     # rm all files in git submodule dir
+    rm_all_cmd="rm -rf ./*"
+    echo "${c_gry}\$ ${rm_all_cmd}${c_off}"
+    $rm_all_cmd
+
     # unarchive sdk to git submodule dir
-    # git add
-    # git commit -m "123.0"
-    # rm sdk
-done
+    # tar xzf "${sdk_filename}" -C "${submodule_dir}"
+    tar_cmd="tar xzf ../${sdk_filename}"
+    echo "${c_gry}\$ ${tar_cmd}${c_off}"
+    $tar_cmd
+
+    gcloud_comp_cmd="./${sdk_dir}/bin/gcloud components install app-engine-python app-engine-python-extras --quiet"
+    echo "${c_gry}\$ ${gcloud_comp_cmd}${c_off}"
+    $gcloud_comp_cmd >/dev/null 2>&1
+
+    git_add_cmd="git add ."
+    echo "${c_gry}\$ ${git_add_cmd}${c_off}"
+    $git_add_cmd >/dev/null 2>&1
+
+    commit_version_cmd="git commit -m v${v}"
+    echo "${c_gry}\$ ${commit_version_cmd}${c_off}"
+    $commit_version_cmd >/dev/null 2>&1
+
+    popd_cmd="popd"
+    echo "${c_gry}\$ ${popd_cmd}${c_off}"
+    $popd_cmd >/dev/null 2>&1
+
+    rm_sdk_cmd="rm ${sdk_filename}"
+    echo "${c_gry}\$ ${rm_sdk_cmd}${c_off}"
+    $rm_sdk_cmd
+
+    echo
+  done
+
+  exit 0
+  ;;
+
+"reset")
+  rm -rf "./${submodule_dir}"
+  git reset -- "./${submodule_dir}"
+  git reset .gitmodules
+  rm -f .gitmodules
+  ;;
+*)
+  dieWithUsage main "${error} Unknown command."
+  ;;
+esac
