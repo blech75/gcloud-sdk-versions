@@ -1,0 +1,43 @@
+### BEGIN: project root boilerplate ------------------------------------------
+#
+# determine the project root and execute everything relative to it. this must
+# come first so we and our dependent scripts can correctly compute paths.
+#
+# https://stackoverflow.com/a/246128/2284440
+current_dir_abs_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+project_path="$current_dir_abs_path"
+cd "$project_path"
+### END: project root boilerplate --------------------------------------------
+
+# terminal colors
+c_off=$'\e[0m'
+c_bld="$(tput bold)"
+c_gry="${c_bld}$(tput setaf 0)"
+c_red="$(tput setaf 1)"
+c_grn="$(tput setaf 2)"
+c_ylw="$(tput setaf 3)"
+c_blu="$(tput setaf 4)"
+c_brd="${c_bld}${c_red}"
+c_byl="${c_bld}${c_ylw}"
+c_bgrn="${c_bld}${c_grn}"
+
+error="${c_brd}Error:${c_off}"
+
+function showHelp() {
+  docs && exit 0
+}
+
+function die() {
+  for msg in "$@"; do
+    echo "$msg" >&2
+  done
+  exit 1
+}
+
+function dieWithUsage() {
+  for msg in "$@"; do
+    echo "$msg" >&2
+  done
+  echo >&2
+  usage >&2 && exit 1
+}
